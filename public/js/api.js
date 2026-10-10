@@ -57,4 +57,7 @@ export const api = {
   billingPortal: () => req('POST', '/api/billing/portal', {}),
   connectWorkspace: (org) => req('POST', '/api/workspaces', { org }),
   disconnectWorkspace: (org) => req('DELETE', `/api/workspaces/${enc(org)}`, {}),
+  myCharacter: () => req('GET', '/api/me/character'),
+  saveCharacter: (character) => req('PUT', '/api/me/character', character),
+  resetCharacter: () => req('DELETE', '/api/me/character', {}),
 };

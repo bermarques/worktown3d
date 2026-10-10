@@ -150,8 +150,21 @@ A pocket shortcut to everything, from anywhere in the building:
   puts you next to them (or by their desk, with a bouncing marker over their head).
 - **🚀 Ready**: every PR that's ready to merge across all floors, with a merge button.
 - **🔔 Activity**: new issues, PRs, merges and your own actions; the 📱 chip shows unread news.
+- **🪞 Me**: your passport, to design your character (see [Your character](#your-character)).
 - **📸 Camera**: snapshot the office (no HUD) and save it as a JPEG.
 - **⚙️ Settings**: mouse sensitivity, field of view, name tags, shadows, outlines, sounds (remembered per browser).
+
+## Your character
+
+Everyone gets a look drawn from their GitHub login. If you signed in with your own GitHub account (or, in local mode,
+the GitHub CLI is), you can design your own: phone → **🪞 Me** opens your **passport**, with tabs for **Skin**,
+**Eyes** (shape and color), **Clothes** (shirt and pants) and **Accessories** (hats, headphones, glasses, hair style
+and color). The preview turns as you drag it; **🎲 Surprise me** rolls a random look and **↺ My default look** goes
+back to the drawn one.
+
+**Save** keeps it on the API (between sessions, on any device), and it's how everyone sees you: at your desk on the
+floors you work on, whether or not you're online, and walking around when you're in the building. Teammates in the
+building with you see the change at once; everyone else with their next floor refresh.
 
 ## How it works
 
@@ -162,7 +175,8 @@ public/js/main.js          renderer, game loop, floors, elevator rides, polling,
 public/js/live.js          multiplayer: the /api/live WebSocket, who's in the building, sending your position
 public/js/permissions.js   which buttons the viewer gets, from their GitHub permissions
 public/js/world/*          building, furniture, characters, repo floor, lobby, canvas screens, other players
-public/js/ui/*             HUD, panels, Kanban, phone, manager console, title screen, plan card
+public/js/ui/*             HUD, panels, Kanban, phone, manager console, title screen, plan card, passport
+                           (character customizer)
 ```
 
 Rendering is Three.js with toon materials and an outline pass. Static furniture is merged into a handful of draw
@@ -173,8 +187,3 @@ Security details are in [SECURITY.md](SECURITY.md).
 ## Roadmap
 
 - **Bigger plans.** Subscriptions that connect more than one organization.
-- **Character customization.** People who sign in with their own GitHub account can design the character that
-  represents them (hair, colors, accessories). Profiles will be keyed by GitHub user id and editable only by that
-  person, from a "Me" app on the phone. Characters already take a custom look (`customLook` in
-  `world/character.js` lists what can change), and the people walking around redraw as soon as theirs changes; desk
-  characters will pick it up from the floor data.

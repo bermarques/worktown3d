@@ -155,7 +155,7 @@ export class RepoFloor {
       this.group.add(ws);
 
       if (!dev) return;
-      const ch = new Character(dev, { seat, floor: this });
+      const ch = new Character(dev, { seat, floor: this, character: dev.character });
       this.group.add(ch.root);
       ch.laptop = { canvas: laptopCanvas, tex: screenTex, lastDraw: -1, mesh: ws.userData.laptop };
       ch.hitbox.userData.interact = { label: `Talk to @${dev.login}`, kind: 'dev', login: dev.login };
@@ -372,6 +372,31 @@ export class RepoFloor {
     for (const ch of this.characters) ch.root.visible = !logins.has(ch.login.toLowerCase());
   }
 
+  /**
+   * Someone changed how they look: rebuild their desk character, at their desk. Returns true when it was rebuilt
+   * (the interaction targets changed with it).
+   */
+  restyle(login, character, dev = null) {
+    const i = this.characters.findIndex((c) => c.login.toLowerCase() === login.toLowerCase());
+    if (i < 0) return false;
+    const old = this.characters[i];
+    if (JSON.stringify(old.character) === JSON.stringify(character || null)) return false;
+    const ch = new Character(dev || old.dev, { seat: old.seat, floor: this, character });
+    ch.laptop = old.laptop;
+    ch.hitbox.userData.interact = old.hitbox.userData.interact;
+    ch.root.visible = old.root.visible;
+    if (old.coffeeSpot) old.coffeeSpot.taken = null;
+    if (this.marker && this.marker.ch === old) this.clearMarker();
+    this.group.remove(old.root);
+    old.dispose();
+    disposeTree(old.root);
+    this.group.add(ch.root);
+    this.interactables[this.interactables.indexOf(old.hitbox)] = ch.hitbox;
+    this.characters[i] = ch;
+    ch.awayChanged = true;
+    return true;
+  }
+
   /** Where to stand to see someone: behind their shoulder at the desk, or next to them on a break. */
   personSpot(login) {
     const ch = this.findCharacter(login);
@@ -420,12 +445,12 @@ export class RepoFloor {
     if (next.length !== current.size || next.some((d) => !current.has(d.login))) return false;
     this.data = data;
     const byLogin = new Map(data.devs.map((d) => [d.login, d]));
-    for (const ch of this.characters) {
+    for (const ch of [...this.characters]) {
       const dev = byLogin.get(ch.login);
-      if (dev) {
-        ch.setDev(dev);
-        ch.awayChanged = true;
-      }
+      if (!dev) continue;
+      if (this.restyle(ch.login, dev.character, dev)) continue; // a new look: rebuilt, with the fresh data
+      ch.setDev(dev);
+      ch.awayChanged = true;
     }
     this.drawBoard();
     this.drawSign();
