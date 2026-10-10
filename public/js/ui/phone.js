@@ -11,6 +11,7 @@ const APPS = [
   { id: 'board', name: 'Board', icon: '📋', color: '#4dabf7' },
   { id: 'floors', name: 'Floors', icon: '🛗', color: '#fcc419' },
   { id: 'team', name: 'Team', icon: '👥', color: '#51cf66' },
+  { id: 'me', name: 'Me', icon: '🪞', color: '#f783ac' },
   { id: 'ready', name: 'Ready', icon: '🚀', color: '#ff6b6b' },
   { id: 'activity', name: 'Activity', icon: '🔔', color: '#cc5de8' },
   { id: 'camera', name: 'Camera', icon: '📸', color: '#495057' },
@@ -193,7 +194,8 @@ export function createPhone(app, hooks) {
           APPS.map((a) =>
             h(
               'button',
-              { class: 'ph-icon', onClick: () => go(a.id) },
+              // "Me" opens the passport right away (when there's an account to save the character to)
+              { class: 'ph-icon', onClick: () => (a.id === 'me' && app.canCustomize() ? leaveFor(() => app.openCustomizer(), { resume: false }) : go(a.id)) },
               h('span', { class: 'ph-tile', style: { background: a.color } }, a.icon, badges[a.id] ? h('span', { class: 'ph-badge' }, badges[a.id] > 99 ? '99+' : String(badges[a.id])) : null),
               h('span', { class: 'ph-label' }, a.name),
             ),
@@ -393,6 +395,15 @@ export function createPhone(app, hooks) {
           : live
             ? null
             : empty(loading.size ? 'Looking around the building…' : `@${login} isn't on any floor yet. Assign them an issue to give them a desk!`),
+      );
+    },
+
+    /** Only reached when the character can't be saved anywhere: the demo company. */
+    me() {
+      return appScreen(
+        'Me',
+        h('div', { class: 'ph-person' }, avatarEl(app.viewerLogin(), 72), h('h3', null, `@${app.viewerLogin()}`)),
+        empty(app.status.hosted ? 'Sign in with GitHub to design your character: it’s saved with your account.' : 'Connect the GitHub CLI to design your character: it’s saved with your account.'),
       );
     },
 

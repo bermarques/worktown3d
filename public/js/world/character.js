@@ -4,30 +4,80 @@ import { toon, sphere, capsule, cylinder, cone, torus, roundedBox, mesh, noOutli
 import { mergeSiblings, trimShadows } from '../engine/merge.js';
 import { hash, seeded, makeCanvas, canvasTexture, drawAvatar, fitText, FONT, personColor, fillRound } from '../engine/canvas.js';
 
+// Looks drawn from a login pick from these (keep them as they are, or everyone's default look changes).
 const SKIN = ['#ffdbc4', '#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffe0bd', '#f6d1b8'];
 const SHIRTS = ['#4dabf7', '#ff6b6b', '#69db7c', '#ffd43b', '#da77f2', '#ffa94d', '#38d9a9', '#748ffc', '#f783ac', '#ffffff', '#343a40'];
 const PANTS = ['#364fc7', '#495057', '#5c3d2e', '#2b8a3e', '#212529', '#1864ab'];
 const HAIR = ['#2b1d14', '#5a3825', '#a0642f', '#e6c36a', '#d9480f', '#1a1a1a', '#868e96', '#e64980', '#4c6ef5'];
+const EYE_DEFAULT = '#1b1b24';
+
+/** What a character can be customized with. The API accepts the same option names (and any #rrggbb color). */
+export const OPTIONS = {
+  hairStyle: ['short', 'spiky', 'bun', 'long', 'curly', 'bald'],
+  eyes: ['round', 'dots', 'happy', 'sleepy', 'big'],
+  glasses: ['none', 'round', 'square', 'shades'],
+  headwear: ['none', 'headphones', 'cap', 'beanie', 'party'],
+};
+
+/** Colors offered in the customizer. */
+export const PALETTES = {
+  skin: [...SKIN, '#fbe3d6', '#a86b3c', '#6b3e26', '#3b2219', '#b4e3a8', '#a5d8ff'],
+  hair: [...HAIR, '#f8f0e3', '#2f9e44', '#ae3ec9'],
+  eyeColor: [EYE_DEFAULT, '#5a3825', '#1864ab', '#2b8a3e', '#5f3dc4', '#c92a2a', '#868e96'],
+  shirt: [...SHIRTS, '#fa5252', '#1864ab', '#2b8a3e', '#e8590c'],
+  pants: [...PANTS, '#868e96', '#f8f0e3', '#c92a2a', '#5f3dc4'],
+};
 
 const damp = (current, target, k, dt) => current + (target - current) * (1 - Math.exp(-k * dt));
 const STAND_Y = 0.63;
 const SIT_Y = 0.45;
 
 const HEX = /^#[0-9a-f]{6}$/i;
+const COLOR_KEYS = ['skin', 'hair', 'eyeColor', 'shirt', 'pants'];
+const OLD_HAIR = ['short', 'spiky', 'bun', 'long', 'beanie', 'curly', 'bald'];
 
-/**
- * What a custom character (character customization, on the roadmap) changes in someone's look: skin, shirt, pants and
- * hair colors (#rrggbb), hairStyle (0 short, 1 spiky, 2 bun, 3 long, 4 beanie, 5 curly, 6 bald), glasses and
- * headphones (true/false) and height (0.9 to 1.1). Anything else, or out of range, is ignored, and what isn't set
- * keeps the look drawn from the login.
- */
+/** The look drawn from a login: stable for each person, with similar logins spread across the options. */
+export function defaultLook(login) {
+  const r = seeded(hash(login));
+  const pick = (list) => list[Math.floor(r() * list.length)];
+  const skin = pick(SKIN);
+  const shirt = pick(SHIRTS);
+  const pants = pick(PANTS);
+  const hair = pick(HAIR);
+  const hairStyle = OLD_HAIR[Math.floor(r() * 7)];
+  const glasses = r() < 0.35 ? 'round' : 'none';
+  const headphones = r() < 0.15;
+  const height = 0.95 + r() * 0.1;
+  return {
+    skin,
+    shirt,
+    pants,
+    hair,
+    hairStyle: hairStyle === 'beanie' ? 'short' : hairStyle,
+    eyes: 'round',
+    eyeColor: EYE_DEFAULT,
+    glasses,
+    headwear: hairStyle === 'beanie' ? 'beanie' : headphones ? 'headphones' : 'none',
+    height,
+  };
+}
+
+/** The parts of a saved character (from the API) to draw; anything missing or unknown keeps the default look. */
 export function customLook(character) {
   const out = {};
   if (!character || typeof character !== 'object') return out;
-  for (const key of ['skin', 'shirt', 'pants', 'hair']) if (typeof character[key] === 'string' && HEX.test(character[key])) out[key] = character[key];
-  if (Number.isInteger(character.hairStyle) && character.hairStyle >= 0 && character.hairStyle <= 6) out.hairStyle = character.hairStyle;
-  for (const key of ['glasses', 'headphones']) if (typeof character[key] === 'boolean') out[key] = character[key];
-  if (typeof character.height === 'number' && character.height >= 0.9 && character.height <= 1.1) out.height = character.height;
+  for (const key of COLOR_KEYS) if (typeof character[key] === 'string' && HEX.test(character[key])) out[key] = character[key];
+  for (const [key, options] of Object.entries(OPTIONS)) if (options.includes(character[key])) out[key] = character[key];
+  return out;
+}
+
+/** Someone's look: their saved character over the look drawn from their login. */
+export const lookOf = (login, character) => ({ ...defaultLook(login), ...customLook(character) });
+
+/** A look as a character to save (the API's shape: no height, which stays the one drawn from the login). */
+export function characterOf(look) {
+  const out = {};
+  for (const key of [...COLOR_KEYS, ...Object.keys(OPTIONS)]) out[key] = look[key];
   return out;
 }
 
@@ -42,29 +92,16 @@ export class Character {
   /**
    * @param {object} dev   floor dev model ({login, name, status, current, ...})
    * @param {object} opts  { seat: {x, z, rotY}, floor, character }  floor provides pathToCoffee()/coffeeSpot();
-   *                       character: a custom look (see customLook), when the person has one
+   *                       character: their saved character (see customLook), when they designed one
    */
   constructor(dev, { seat, floor, character = null }) {
     this.dev = dev;
     this.login = dev.login;
     this.seat = seat;
     this.floor = floor;
-    const h = hash(dev.login);
-    this.rand = seeded(h ^ 0x9e3779b9);
-    // Appearance is stable per login; a seeded RNG spreads similar logins across all the options.
-    const r = seeded(h);
-    const pick = (list) => list[Math.floor(r() * list.length)];
-    this.look = {
-      skin: pick(SKIN),
-      shirt: pick(SHIRTS),
-      pants: pick(PANTS),
-      hair: pick(HAIR),
-      hairStyle: Math.floor(r() * 7),
-      glasses: r() < 0.35,
-      headphones: r() < 0.15,
-      height: 0.95 + r() * 0.1,
-      ...customLook(character),
-    };
+    this.character = character || null;
+    this.rand = seeded(hash(dev.login) ^ 0x9e3779b9);
+    this.look = lookOf(dev.login, character);
 
     this.root = new THREE.Group();
     this.root.userData.dynamic = true;
@@ -145,28 +182,14 @@ export class Character {
     for (const s of [-1, 1]) mesh(sphere(0.06, 10, 8), skin, { x: s * 0.265, y: -0.01, parent: this.head });
     mesh(sphere(0.032, 10, 8), toon(new THREE.Color(L.skin).offsetHSL(0, 0.05, -0.08)), { y: -0.03, z: 0.27, parent: this.head });
 
-    this.eyes = [-1, 1].map((s) => {
-      const eye = joint(this.head, s * 0.1, 0.035, 0.225);
-      mesh(sphere(0.07, 14, 10), noOutline(toon('#ffffff').clone()), { sz: 0.55, parent: eye });
-      mesh(sphere(0.042, 12, 8), noOutline(new THREE.MeshBasicMaterial({ color: '#1b1b24' })), { z: 0.03, parent: eye });
-      mesh(sphere(0.013, 6, 6), noOutline(new THREE.MeshBasicMaterial({ color: '#ffffff' })), { x: -0.015, y: 0.018, z: 0.065, parent: eye });
-      return eye;
-    });
+    this.buildEyes(skin);
     mesh(torus(0.06, 0.013, 6, 16, Math.PI), noOutline(new THREE.MeshBasicMaterial({ color: '#7a2e2e' })), { y: -0.095, z: 0.245, rz: Math.PI, rx: -0.25, parent: this.head });
     const blush = noOutline(new THREE.MeshBasicMaterial({ color: '#ff8fa3', transparent: true, opacity: 0.55 }));
     for (const s of [-1, 1]) mesh(sphere(0.042, 10, 8), blush, { x: s * 0.17, y: -0.055, z: 0.2, sz: 0.4, ry: s * 0.6, cast: false, parent: this.head });
 
     this.buildHair(hair);
-    if (L.glasses) {
-      const frame = noOutline(new THREE.MeshBasicMaterial({ color: '#1b1b24' }));
-      for (const s of [-1, 1]) mesh(torus(0.065, 0.011, 6, 18), frame, { x: s * 0.1, y: 0.035, z: 0.262, parent: this.head });
-      mesh(box(0.07, 0.014, 0.014), frame, { y: 0.05, z: 0.27, parent: this.head });
-    }
-    if (L.headphones) {
-      const hp = toon('#212529');
-      mesh(torus(0.29, 0.025, 6, 20, Math.PI), hp, { y: 0.0, parent: this.head });
-      for (const s of [-1, 1]) mesh(cylinder(0.08, 0.08, 0.06, 14), toon(personColor(this.login)), { x: s * 0.29, rz: Math.PI / 2, parent: this.head });
-    }
+    this.buildGlasses();
+    this.buildHeadwear();
 
     // name tag (sprite)
     const tag = makeCanvas(512, 128);
@@ -188,38 +211,101 @@ export class Character {
     trimShadows(this.root, 0.06);
   }
 
-  buildHair(mat) {
-    const style = this.look.hairStyle;
+  buildEyes(skin) {
+    const style = this.look.eyes;
+    const pupil = noOutline(new THREE.MeshBasicMaterial({ color: this.look.eyeColor }));
+    const white = noOutline(toon('#ffffff').clone());
+    const shine = noOutline(new THREE.MeshBasicMaterial({ color: '#ffffff' }));
+    this.eyes = [-1, 1].map((s) => {
+      const eye = joint(this.head, s * 0.1, 0.035, 0.225);
+      if (style === 'dots') {
+        mesh(sphere(0.034, 12, 8), pupil, { z: 0.035, sz: 0.6, parent: eye });
+      } else if (style === 'happy') {
+        // closed, smiling eyes: little arches
+        mesh(torus(0.038, 0.012, 6, 14, Math.PI), pupil, { y: -0.012, z: 0.04, parent: eye });
+      } else {
+        const k = style === 'big' ? 1.25 : 1;
+        mesh(sphere(0.07 * k, 14, 10), white, { sz: 0.55, parent: eye });
+        mesh(sphere(0.042 * k, 12, 8), pupil, { z: 0.03, parent: eye });
+        mesh(sphere(0.013 * k, 6, 6), shine, { x: -0.015 * k, y: 0.018 * k, z: 0.065, parent: eye });
+        // heavy eyelids over the top half
+        if (style === 'sleepy') mesh(new THREE.SphereGeometry(0.076, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.45), skin, { y: 0.004, z: 0.006, sz: 0.62, rx: 0.3, parent: eye });
+      }
+      return eye;
+    });
+  }
+
+  buildGlasses() {
+    const style = this.look.glasses;
+    if (style === 'none') return;
+    const frame = noOutline(new THREE.MeshBasicMaterial({ color: '#1b1b24' }));
+    const lens = style === 'shades' ? noOutline(new THREE.MeshBasicMaterial({ color: '#212529' })) : null;
+    for (const s of [-1, 1]) {
+      // a 4-sided torus, turned 45°, is a square frame
+      if (style === 'square') mesh(torus(0.08, 0.011, 4, 4), frame, { x: s * 0.1, y: 0.035, z: 0.262, rz: Math.PI / 4, parent: this.head });
+      else mesh(torus(0.065, 0.011, 6, 18), frame, { x: s * 0.1, y: 0.035, z: 0.262, parent: this.head });
+      if (lens) mesh(cylinder(0.062, 0.062, 0.006, 18), lens, { x: s * 0.1, y: 0.035, z: 0.264, rx: Math.PI / 2, parent: this.head });
+    }
+    mesh(box(0.07, 0.014, 0.014), frame, { y: 0.05, z: 0.27, parent: this.head });
+  }
+
+  buildHeadwear() {
     const head = this.head;
-    const dome = () => mesh(new THREE.SphereGeometry(0.29, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.52), mat, { y: 0.015, rx: -0.3, parent: head });
-    switch (style) {
-      case 0: // short
-        dome();
+    switch (this.look.headwear) {
+      case 'headphones': {
+        const hp = toon('#212529');
+        mesh(torus(0.29, 0.025, 6, 20, Math.PI), hp, { y: 0.0, parent: head });
+        for (const s of [-1, 1]) mesh(cylinder(0.08, 0.08, 0.06, 14), toon(personColor(this.login)), { x: s * 0.29, rz: Math.PI / 2, parent: head });
         break;
-      case 1: // spiky
-        dome();
-        for (let i = 0; i < 7; i++) {
-          const a = (i / 7) * Math.PI * 2;
-          mesh(cone(0.07, 0.2, 8), mat, { x: Math.cos(a) * 0.14, y: 0.25, z: Math.sin(a) * 0.14 - 0.03, rx: Math.sin(a) * 0.5, rz: -Math.cos(a) * 0.5, parent: head });
-        }
-        break;
-      case 2: // bun
-        dome();
-        mesh(sphere(0.12, 14, 10), mat, { y: 0.27, z: -0.12, parent: head });
-        break;
-      case 3: // long
-        dome();
-        mesh(roundedBox(0.54, 0.5, 0.16, 0.07), mat, { y: -0.14, z: -0.18, parent: head });
-        break;
-      case 4: {
-        // beanie
+      }
+      case 'beanie': {
         const hat = toon(personColor(this.login + 'hat'));
         mesh(new THREE.SphereGeometry(0.295, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), hat, { y: 0.03, parent: head });
         mesh(torus(0.27, 0.045, 8, 24), hat, { y: 0.06, rx: Math.PI / 2, parent: head });
         mesh(sphere(0.07, 10, 8), toon('#ffffff'), { y: 0.33, parent: head });
         break;
       }
-      case 5: // curly
+      case 'cap': {
+        const cap = toon(personColor(this.login + 'cap'));
+        mesh(new THREE.SphereGeometry(0.3, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.42), cap, { y: 0.04, parent: head });
+        mesh(cylinder(0.17, 0.17, 0.022, 20), cap, { y: 0.125, z: 0.25, sz: 0.85, rx: 0.1, parent: head });
+        mesh(sphere(0.03, 8, 6), cap, { y: 0.34, parent: head });
+        break;
+      }
+      case 'party': {
+        mesh(cone(0.12, 0.34, 16), toon(personColor(this.login + 'party')), { x: 0.01, y: 0.41, rz: -0.12, parent: head });
+        mesh(sphere(0.05, 10, 8), toon('#ffffff'), { x: 0.03, y: 0.58, parent: head });
+        break;
+      }
+    }
+  }
+
+  buildHair(mat) {
+    const head = this.head;
+    // Under a cap or a beanie, only the hair that shows below it is drawn.
+    const covered = this.look.headwear === 'cap' || this.look.headwear === 'beanie';
+    const style = covered && !['long', 'bald'].includes(this.look.hairStyle) ? 'short' : this.look.hairStyle;
+    const dome = () => mesh(new THREE.SphereGeometry(0.29, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.52), mat, { y: 0.015, rx: -0.3, parent: head });
+    switch (style) {
+      case 'short':
+        dome();
+        break;
+      case 'spiky':
+        dome();
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 7) * Math.PI * 2;
+          mesh(cone(0.07, 0.2, 8), mat, { x: Math.cos(a) * 0.14, y: 0.25, z: Math.sin(a) * 0.14 - 0.03, rx: Math.sin(a) * 0.5, rz: -Math.cos(a) * 0.5, parent: head });
+        }
+        break;
+      case 'bun':
+        dome();
+        mesh(sphere(0.12, 14, 10), mat, { y: 0.27, z: -0.12, parent: head });
+        break;
+      case 'long':
+        if (!covered) dome();
+        mesh(roundedBox(0.54, 0.5, 0.16, 0.07), mat, { y: -0.14, z: -0.18, parent: head });
+        break;
+      case 'curly':
         for (let i = 0; i < 11; i++) {
           const a = (i / 11) * Math.PI * 2;
           mesh(sphere(0.1, 10, 8), mat, { x: Math.cos(a) * 0.19, y: 0.18 + (i % 2) * 0.05, z: Math.sin(a) * 0.19 - 0.04, parent: head });
@@ -227,7 +313,7 @@ export class Character {
         mesh(sphere(0.16, 12, 10), mat, { y: 0.24, z: -0.03, parent: head });
         break;
       default: // bald with a little tuft
-        mesh(sphere(0.05, 8, 6), mat, { y: 0.28, z: 0.05, parent: head });
+        if (!covered) mesh(sphere(0.05, 8, 6), mat, { y: 0.28, z: 0.05, parent: head });
     }
   }
 

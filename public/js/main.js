@@ -17,6 +17,7 @@ import { openManagerConsole } from './ui/manager.js';
 import { renderStart, hideStart, controlsList, orgFromPath, signOut } from './ui/start.js';
 import { createPhone } from './ui/phone.js';
 import { billingReturnNotice } from './ui/billing.js';
+import { openCustomizer } from './ui/customizer.js';
 
 // ------------------------------------------------------------------ renderer & scene
 const canvas = document.getElementById('scene');
@@ -114,6 +115,8 @@ const app = {
   isDemo: false,
   /** Multiplayer connection (organization buildings in hosted mode), or null. */
   live: null,
+  /** Your saved character: undefined until loaded, null for the look drawn from your login. */
+  myCharacter: undefined,
   floorCache: new Map(),
   liveModals: new Set(),
 
@@ -180,6 +183,28 @@ const app = {
   },
   goToPerson,
   goToPlayer,
+  /** Is there an account to save a character to? (Signed in with GitHub, or the GitHub CLI's account locally.) */
+  canCustomize() {
+    const s = this.status;
+    return !!s && !this.isDemo && (s.hosted ? !!s.user : s.mode === 'github');
+  },
+  /** The passport (phone → Me), starting from your saved character. */
+  async openCustomizer() {
+    if (this.myCharacter === undefined) {
+      try {
+        this.myCharacter = (await api.myCharacter()).character;
+      } catch (e) {
+        hud.toast(`⚠️ ${e.message}`, 'error', 7000);
+        return;
+      }
+    }
+    openCustomizer(app, {
+      onSaved: (character) => {
+        app.myCharacter = character;
+        characterChanged(app.viewerLogin(), character);
+      },
+    });
+  },
   takePhoto() {
     renderFrame();
     return canvas.toDataURL('image/jpeg', 0.92);
@@ -310,6 +335,16 @@ async function goToPerson(login, repo) {
   app.floor.highlight(login);
 }
 
+/**
+ * Someone's look changed (you saved yours, or a teammate saved theirs): the floors we've loaded get it, and their
+ * desk character on this floor is redrawn. Others see your change through the API (live, or with their next refresh).
+ */
+function characterChanged(login, character) {
+  const key = login.toLowerCase();
+  for (const data of app.floorCache.values()) for (const dev of data.devs) if (dev.login.toLowerCase() === key) dev.character = character;
+  if (app.floor && app.floor.restyle && app.floor.restyle(login, character)) refreshTargets();
+}
+
 /** Ride to where someone who is in the building right now stands, and face them. */
 async function goToPlayer(login) {
   const at = () => {
@@ -373,7 +408,7 @@ async function refreshFloor(fresh = false, { quiet = false } = {}) {
   if (!app.floor.updateData(data)) {
     hud.toast('👋 The team on this floor changed — rearranging desks', 'info');
     mountFloor(index, data, { keepPosition: true });
-  }
+  } else refreshTargets(); // someone's desk character may have been redrawn with a new look
   app.floorData = data;
   rerenderLiveModals();
 }
@@ -627,6 +662,7 @@ function startLive() {
           break;
         case 'character':
           remote.restyle(someone);
+          characterChanged(someone.login, someone.character);
           break;
       }
       if (event === 'move') return; // the HUD and the phone don't show exact positions

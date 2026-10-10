@@ -24,4 +24,6 @@ handled by the API (worktown3d-api), whose SECURITY.md covers them.
   `Referrer-Policy`, HSTS on https, and request time limits. Only files under `public/` and the Three.js build are
   served.
 - All GitHub content is rendered as text (no `innerHTML`); external links must be `https://`.
+- Characters (from the floor data or other players) are only drawn from known options and `#rrggbb` colors; anything
+  else falls back to the look drawn from the login.
 - Card details never reach Worktown3D: people pay on Stripe Checkout and manage billing in Stripe's customer portal.
