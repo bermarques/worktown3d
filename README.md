@@ -6,8 +6,7 @@
 first person: every repository is a floor, every current team member sits at a desk, and their laptop shows what
 they're working on right now.
 
-**[Try it at worktown3d.com](https://worktown3d.com)** · [Run it yourself](#quick-start) ·
-[API repository](https://github.com/bermarques/worktown3d-api)
+[Run it yourself](#quick-start) · [API repository](https://github.com/bermarques/worktown3d-api)
 
 ![The web-app floor of the demo company: developers at their laptops in front of the team board](docs/screenshots/floor.png)
 
