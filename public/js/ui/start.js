@@ -125,7 +125,7 @@ export function renderStart(status, { onEnter, onReload, error, notice, needsSub
     );
   }
   parts.push(controlsList());
-  card.append(...parts);
+  card.append(...parts.filter(Boolean));
 }
 
 function titleBlock() {
@@ -222,7 +222,7 @@ function hostedStart(status, { onEnter, onReload, error, notice, needsSubscripti
     picker.replaceChildren(h('p', { class: 'muted' }, 'Loading your organizations…'));
     try {
       const [owners, summary] = await Promise.all([api.owners(), status.billing ? api.billing().catch(() => null) : null]);
-      picker.replaceChildren(
+      picker.replaceChildren(...[
         owners.length
           ? h(
               'div',
@@ -232,7 +232,7 @@ function hostedStart(status, { onEnter, onReload, error, notice, needsSubscripti
             )
           : h('p', { class: 'muted' }, 'No organizations available yet.'),
         status.installUrl ? h('p', { class: 'muted small' }, "Don't see your organization? An owner needs to ", h('a', { href: status.installUrl, target: '_blank', rel: 'noopener noreferrer' }, 'install the Worktown3D GitHub App'), ' on it.') : null,
-      );
+      ].filter(Boolean));
     } catch (e) {
       picker.replaceChildren(h('p', { class: 'error' }, e.message));
     }
