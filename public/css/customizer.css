@@ -1,0 +1,224 @@
+/* ------------------------------------------------------------ passport (character customizer, phone → Me) */
+.modal.passport-modal {
+  width: min(980px, 100%);
+  background: #3b5bdb;
+}
+
+.passport-modal .modal-head h2,
+.passport-modal .modal-sub {
+  color: #fff;
+}
+
+.passport-modal .modal-x {
+  background: var(--paper);
+}
+
+.passport {
+  display: grid;
+  grid-template-columns: minmax(260px, 2fr) 3fr;
+  background: var(--paper);
+  border: 3px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.pp-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  min-width: 0;
+}
+
+/* left page: the portrait */
+.pp-portrait {
+  align-items: center;
+  background: var(--paper-2);
+  border-right: 3px dashed #d9c9a3;
+}
+
+.pp-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  max-height: 420px;
+  border: 3px solid var(--line);
+  border-radius: 16px;
+  background: radial-gradient(circle at 50% 35%, #d0ebff 0%, #a5d8ff 55%, #74c0fc 100%);
+  overflow: hidden;
+}
+
+.pp-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.pp-canvas:active {
+  cursor: grabbing;
+}
+
+.pp-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+
+.pp-name {
+  font: 700 22px var(--display);
+}
+
+.pp-tools {
+  justify-content: center;
+}
+
+/* right page: tabs and options */
+.pp-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pp-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 3px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 3px 3px 0 var(--line);
+  font: 700 15px var(--display);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.pp-tab-icon {
+  font-size: 18px;
+}
+
+.pp-tab.on {
+  background: var(--yellow);
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 var(--line);
+}
+
+.pp-options {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* one height for every tab, so the passport doesn't jump while you flip through them */
+  height: clamp(240px, 52vh, 380px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.pp-part h4 {
+  margin: 0 0 8px;
+  font: 700 15px var(--display);
+}
+
+.pp-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pp-swatch {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border: 3px solid var(--line);
+  border-radius: 50%;
+  box-shadow: 2px 2px 0 var(--line);
+  cursor: pointer;
+  transition: transform 0.08s;
+}
+
+.pp-swatch:hover {
+  transform: scale(1.08);
+}
+
+.pp-swatch.on {
+  outline: 4px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.pp-swatch.on::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font: 800 18px var(--body);
+  text-shadow: 0 0 3px #000, 0 0 6px #000;
+}
+
+.pp-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pp-choice {
+  padding: 9px 14px;
+  border: 3px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 2px 2px 0 var(--line);
+  font: 800 14px var(--body);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.pp-choice:hover {
+  background: #fff9db;
+}
+
+.pp-choice.on {
+  background: var(--yellow);
+}
+
+.pp-actions {
+  padding-top: 8px;
+  border-top: 3px dashed #e9dfc6;
+}
+
+@media (max-width: 720px) {
+  .passport {
+    grid-template-columns: 1fr;
+  }
+
+  .pp-portrait {
+    border-right: 0;
+    border-bottom: 3px dashed #d9c9a3;
+  }
+
+  .pp-stage {
+    max-width: 240px;
+    max-height: 300px;
+  }
+
+  .pp-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pp-tab {
+    justify-content: center;
+  }
+
+  .pp-options {
+    height: auto;
+  }
+}

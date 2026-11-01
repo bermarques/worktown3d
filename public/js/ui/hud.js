@@ -63,6 +63,13 @@ export const hud = {
     b.classList.toggle('show', n > 0);
   },
 
+  /** How many other people are in the building right now (multiplayer); hidden when it's just you. */
+  setOnline(n) {
+    const el = $('online-chip');
+    el.textContent = `🟢 ${n} ${n === 1 ? 'other person' : 'others'} here`;
+    el.classList.toggle('hidden', !n);
+  },
+
   /** Camera flash. */
   flash() {
     const el = $('flash');

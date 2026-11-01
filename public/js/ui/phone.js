@@ -11,6 +11,7 @@ const APPS = [
   { id: 'board', name: 'Board', icon: '📋', color: '#4dabf7' },
   { id: 'floors', name: 'Floors', icon: '🛗', color: '#fcc419' },
   { id: 'team', name: 'Team', icon: '👥', color: '#51cf66' },
+  { id: 'me', name: 'Me', icon: '🪞', color: '#f783ac' },
   { id: 'ready', name: 'Ready', icon: '🚀', color: '#ff6b6b' },
   { id: 'activity', name: 'Activity', icon: '🔔', color: '#cc5de8' },
   { id: 'camera', name: 'Camera', icon: '📸', color: '#495057' },
@@ -109,6 +110,21 @@ export function createPhone(app, hooks) {
   const indexOf = (repo) => app.world.floors.indexOf(repo) + 1;
   const label = (i) => (i === 0 ? 'G' : `${i}F`);
 
+  /** Someone who is in the building right now (multiplayer), or null. */
+  const online = (login) => (app.live && app.live.connected ? app.live.playerByLogin(login) : null);
+  /** Where an online person is: "here now", "in the lobby", "on 3F"; null when they're offline. */
+  function liveLine(login) {
+    const p = online(login);
+    if (!p) return null;
+    if (!p.at) return '🟢 just arrived';
+    if (p.at.floor === app.currentRepo()) return '🟢 here now';
+    return p.at.floor === null ? '🟢 in the lobby' : `🟢 on ${label(indexOf(p.at.floor))}`;
+  }
+  const withLive = (login, line) => {
+    const live = liveLine(login);
+    return live ? `${live} · ${line}` : line;
+  };
+
   /** Cached floor data, refreshed in the background when older than maxAge. */
   function need(repo, maxAge = FLOOR_MAX_AGE) {
     const entry = app.cachedFloor(repo);
@@ -178,7 +194,8 @@ export function createPhone(app, hooks) {
           APPS.map((a) =>
             h(
               'button',
-              { class: 'ph-icon', onClick: () => go(a.id) },
+              // "Me" opens the passport right away (when there's an account to save the character to)
+              { class: 'ph-icon', onClick: () => (a.id === 'me' && app.canCustomize() ? leaveFor(() => app.openCustomizer(), { resume: false }) : go(a.id)) },
               h('span', { class: 'ph-tile', style: { background: a.color } }, a.icon, badges[a.id] ? h('span', { class: 'ph-badge' }, badges[a.id] > 99 ? '99+' : String(badges[a.id])) : null),
               h('span', { class: 'ph-label' }, a.name),
             ),
@@ -303,7 +320,13 @@ export function createPhone(app, hooks) {
       );
       if (ui.teamTab === 'floor') {
         const data = app.floorData;
-        const rows = data.devs.map((d) => personRow(d.login, d.name, statusLine(d, data.repo.name), [label(app.floorIndex)]));
+        const devs = new Set(data.devs.map((d) => d.login.toLowerCase()));
+        // people visiting this floor live, who don't have a desk here
+        const visitors = (app.live && app.live.connected ? app.live.online() : []).filter((p) => p.at && p.at.floor === data.repo.name && !devs.has(p.login.toLowerCase()));
+        const rows = [
+          ...visitors.map((p) => personRow(p.login, p.name, '🟢 here now · visiting', [label(app.floorIndex)])),
+          ...data.devs.map((d) => personRow(d.login, d.name, withLive(d.login, statusLine(d, data.repo.name)), [label(app.floorIndex)])),
+        ];
         return appScreen('Team', tabs, rows.length ? h('div', { class: 'ph-list' }, rows) : empty('Nobody works on this floor yet.'));
       }
 
@@ -311,11 +334,9 @@ export function createPhone(app, hooks) {
       const where = whereIs();
       const q = ui.teamQuery.toLowerCase();
       const people = (app.world.members || [...where.keys()].map((login) => ({ login, name: null }))).filter((m) => !q || m.login.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q));
-      people.sort((a, b) => {
-        const wa = (where.get(a.login.toLowerCase()) || []).some((x) => x.dev.status === 'working');
-        const wb = (where.get(b.login.toLowerCase()) || []).some((x) => x.dev.status === 'working');
-        return wa === wb ? a.login.localeCompare(b.login) : wa ? -1 : 1;
-      });
+      // people in the building right now first, then whoever is busy
+      const rank = (m) => (online(m.login) ? 0 : (where.get(m.login.toLowerCase()) || []).some((x) => x.dev.status === 'working') ? 1 : 2);
+      people.sort((a, b) => rank(a) - rank(b) || a.login.localeCompare(b.login));
       const search = h('input', {
         class: 'ph-search',
         'data-key': 'team-search',
@@ -330,7 +351,7 @@ export function createPhone(app, hooks) {
         const spots = where.get(m.login.toLowerCase()) || [];
         const busy = spots.find((s) => s.dev.status === 'working');
         const line = busy ? `${statusLine(busy.dev, busy.repo)} · ${busy.repo}` : spots.length ? `💤 idle on ${spots.length} floor${spots.length > 1 ? 's' : ''}` : pending ? '…' : 'Not on any floor yet';
-        return personRow(m.login, m.name, line, spots.map((s) => label(s.index)));
+        return personRow(m.login, m.name, withLive(m.login, line), spots.map((s) => label(s.index)));
       });
       return appScreen('Team', tabs, search, progress(pending, floors().length), rows.length ? h('div', { class: 'ph-list' }, rows) : empty('Nobody matches that search.'));
     },
@@ -339,10 +360,20 @@ export function createPhone(app, hooks) {
       needAll();
       const spots = whereIs().get(login.toLowerCase()) || [];
       const member = (app.world.members || []).find((m) => m.login.toLowerCase() === login.toLowerCase());
-      const name = (member && member.name) || (spots[0] && spots[0].dev.name) || null;
+      const live = online(login);
+      const name = (member && member.name) || (spots[0] && spots[0].dev.name) || (live && live.name) || null;
+      const sameFloor = live && live.at && live.at.floor === app.currentRepo();
       return appScreen(
         `@${login}`,
         h('div', { class: 'ph-person' }, avatarEl(login, 72), h('h3', null, name || `@${login}`), name ? h('div', { class: 'muted' }, `@${login}`) : null, app.isDemo ? null : ghLink(`https://github.com/${login}`, 'GitHub profile ↗')),
+        live
+          ? h(
+              'div',
+              { class: 'ph-card' },
+              h('div', { class: 'ph-card-title' }, `${liveLine(login)}${live.at && live.at.floor ? ` · ${live.at.floor}` : ''}`),
+              live.at ? h('div', { class: 'ph-actions' }, h('button', { class: 'btn small primary', onClick: () => leaveFor(() => app.goToPlayer(login)) }, sameFloor ? '📍 Show me' : '🏃 Take me there')) : null,
+            )
+          : null,
         spots.length
           ? spots.map((s) => {
               const c = s.dev.current;
@@ -361,7 +392,18 @@ export function createPhone(app, hooks) {
                 ),
               );
             })
-          : empty(loading.size ? 'Looking around the building…' : `@${login} isn't on any floor yet. Assign them an issue to give them a desk!`),
+          : live
+            ? null
+            : empty(loading.size ? 'Looking around the building…' : `@${login} isn't on any floor yet. Assign them an issue to give them a desk!`),
+      );
+    },
+
+    /** Only reached when the character can't be saved anywhere: the demo company. */
+    me() {
+      return appScreen(
+        'Me',
+        h('div', { class: 'ph-person' }, avatarEl(app.viewerLogin(), 72), h('h3', null, `@${app.viewerLogin()}`)),
+        empty(app.status.hosted ? 'Sign in with GitHub to design your character: it’s saved with your account.' : 'Connect the GitHub CLI to design your character: it’s saved with your account.'),
       );
     },
 
@@ -569,13 +611,13 @@ export function createPhone(app, hooks) {
 
   const api = {
     isOpen: () => state.open,
-    open(view) {
+    open(view, params = {}) {
       if (state.open || !app.world) return;
       state.open = true;
       if (view) {
         state.history = [];
         state.view = view;
-        state.params = {};
+        state.params = params;
       }
       render();
       root.classList.add('open');

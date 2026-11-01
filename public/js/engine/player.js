@@ -169,9 +169,13 @@ export class Interactor {
 
   update() {
     this.ray.setFromCamera(this.center, this.camera);
-    const hits = this.ray.intersectObjects(this.targets, false);
-    if (!hits.length) return null;
-    const info = hits[0].object.userData.interact;
-    return info || null;
+    // Rays hit hidden objects too: skip anything inside a hidden group (a desk character whose person is here live).
+    const hit = this.ray.intersectObjects(this.targets, false).find((h) => shown(h.object));
+    return (hit && hit.object.userData.interact) || null;
   }
+}
+
+function shown(object) {
+  for (let o = object; o; o = o.parent) if (!o.visible) return false;
+  return true;
 }

@@ -19,6 +19,29 @@ function rawGet(path, headers) {
   });
 }
 
+/** Status of a WebSocket handshake (101 when it upgrades). */
+function upgradeStatus(path, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: base.hostname,
+      port: base.port,
+      path,
+      agent: false,
+      headers: { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==', ...headers },
+    });
+    req.on('response', (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on('upgrade', (_res, socket) => {
+      socket.destroy();
+      resolve(101);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 const STATIC_IMPORT = /^\s*import\s*['"]([^'"]+)['"]|^\s*(?:import|export)\s[^'";]*?\sfrom\s*['"]([^'"]+)['"]/gm;
 const DYNAMIC_IMPORT = /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g;
 
@@ -82,6 +105,13 @@ check('unknown host is refused', (await rawGet('/', { Host: 'evil.example' })) =
 const api = await get('/api/status');
 const body = await api.json().catch(() => ({}));
 check('API requests are proxied (503 with no API running)', api.status === 503 && typeof body.error === 'string', String(api.status));
+
+let status = await upgradeStatus('/api/live');
+check('the multiplayer WebSocket is proxied (503 with no API running)', status === 503, String(status));
+status = await upgradeStatus('/api/elsewhere');
+check('WebSocket upgrades elsewhere are refused', status === 404, String(status));
+status = await upgradeStatus('/api/live', { Host: 'evil.example' });
+check('WebSocket upgrades for an unknown host are refused', status === 421, String(status));
 
 console.log(failures.length ? `\n${failures.length} check(s) failed` : '\nAll checks passed');
 process.exit(failures.length ? 1 : 0);

@@ -98,6 +98,25 @@ code {
   text-overflow: ellipsis;
 }
 
+/* who else is in the building right now (multiplayer) */
+#online-chip {
+  position: fixed;
+  top: 84px;
+  left: 16px;
+  padding: 5px 12px;
+  background: var(--paper);
+  border: 3px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  font: 800 14px var(--body);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+#online-chip.hidden {
+  display: none;
+}
+
 #crosshair {
   position: fixed;
   left: 50%;

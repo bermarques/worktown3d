@@ -59,7 +59,8 @@ const CSP = [
   "style-src 'self' https://fonts.googleapis.com",
   'font-src https://fonts.gstatic.com',
   "img-src 'self' data: blob:",
-  "connect-src 'self'",
+  // Multiplayer's WebSocket is same-origin, but not every browser counts ws(s): as 'self'.
+  `connect-src 'self'${HOSTED ? ` ${PUBLIC_URL.origin.replace(/^http/, 'ws')}` : ''}`,
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'none'",
@@ -149,6 +150,63 @@ function proxy(req, res, url) {
   req.pipe(upstream);
 }
 
+// ------------------------------------------------------------------ multiplayer WebSocket
+// The API's live presence socket (/api/live). The upgrade is passed through as is (the API checks the host, the
+// origin and the session), then bytes flow both ways until either side closes.
+const LIVE_PATH = '/api/live';
+
+function refuseUpgrade(socket, status, text) {
+  socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+}
+
+function proxyUpgrade(req, socket, head) {
+  socket.on('error', () => {});
+  if (!ALLOWED_HOSTS.has(req.headers.host)) return refuseUpgrade(socket, 421, 'Misdirected Request');
+  let pathname;
+  try {
+    pathname = decodeURIComponent(new URL(req.url, 'http://placeholder').pathname);
+  } catch {
+    return refuseUpgrade(socket, 400, 'Bad Request');
+  }
+  if (pathname !== LIVE_PATH) return refuseUpgrade(socket, 404, 'Not Found');
+
+  const remote = req.socket.remoteAddress || 'unknown';
+  const xff = req.headers['x-forwarded-for'];
+  const upstream = http.request({
+    hostname: API.hostname.replace(/^\[|\]$/g, ''),
+    port: API.port || 80,
+    path: req.url,
+    method: 'GET',
+    // Connection and Upgrade stay: they're what asks the API to switch protocols.
+    headers: { ...req.headers, 'x-forwarded-for': typeof xff === 'string' && xff ? `${xff}, ${remote}` : remote },
+  });
+  upstream.setTimeout(15_000, () => upstream.destroy(new Error('timeout')));
+  socket.on('close', () => upstream.destroy());
+  upstream.on('upgrade', (res, apiSocket, apiHead) => {
+    apiSocket.setTimeout(0); // the timeout above was for the handshake; an open socket may stay quiet
+    const lines = ['HTTP/1.1 101 Switching Protocols'];
+    for (let i = 0; i < res.rawHeaders.length; i += 2) lines.push(`${res.rawHeaders[i]}: ${res.rawHeaders[i + 1]}`);
+    socket.write(`${lines.join('\r\n')}\r\n\r\n`);
+    if (apiHead.length) socket.write(apiHead);
+    if (head.length) apiSocket.write(head);
+    apiSocket.on('error', () => socket.destroy());
+    apiSocket.on('close', () => socket.destroy());
+    socket.on('close', () => apiSocket.destroy());
+    apiSocket.pipe(socket).pipe(apiSocket);
+  });
+  // The API answered without upgrading (wrong origin, signed out before the handshake…): pass its status on.
+  upstream.on('response', (res) => {
+    res.resume();
+    refuseUpgrade(socket, res.statusCode, res.statusMessage || 'Refused');
+  });
+  upstream.on('error', (e) => {
+    const reason = e.errors ? e.errors.map((x) => x.message).join(', ') : e.message || e.code;
+    console.error(`[proxy] upgrade ${LIVE_PATH}: ${reason}`);
+    refuseUpgrade(socket, 503, 'Service Unavailable');
+  });
+  upstream.end();
+}
+
 function handle(req, res) {
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
   if (req.url === '/healthz') return send(res, 200, 'ok');
@@ -185,6 +243,7 @@ const server = http.createServer((req, res) => {
     else res.destroy();
   }
 });
+server.on('upgrade', proxyUpgrade);
 server.headersTimeout = 20_000;
 server.requestTimeout = 60_000;
 

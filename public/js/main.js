@@ -6,6 +6,8 @@ import { Player, Interactor } from './engine/player.js';
 import { setAvatarsEnabled, onAvatarsLoaded } from './engine/canvas.js';
 import { RepoFloor } from './world/repoFloor.js';
 import { LobbyFloor } from './world/lobbyFloor.js';
+import { RemotePlayers } from './world/remotePlayers.js';
+import { Live } from './live.js';
 import { WALL_T } from './world/building.js';
 import { hud, ding, setSoundEnabled } from './ui/hud.js';
 import { setModalHooks, isModalOpen } from './ui/modal.js';
@@ -15,6 +17,7 @@ import { openManagerConsole } from './ui/manager.js';
 import { renderStart, hideStart, controlsList, orgFromPath, signOut } from './ui/start.js';
 import { createPhone } from './ui/phone.js';
 import { billingReturnNotice } from './ui/billing.js';
+import { openCustomizer } from './ui/customizer.js';
 
 // ------------------------------------------------------------------ renderer & scene
 const canvas = document.getElementById('scene');
@@ -63,6 +66,15 @@ window.addEventListener('resize', () => {
 const player = new Player(camera, canvas);
 const interactor = new Interactor(camera);
 
+// Multiplayer: the other people in the building right now, drawn on the floor you're on.
+const remote = new RemotePlayers({ onChange: () => refreshTargets() });
+scene.add(remote.group);
+
+/** What the crosshair can interact with: the floor's things and the people walking around it. */
+function refreshTargets() {
+  if (app.floor) interactor.setTargets([...app.floor.interactables, ...remote.hitboxes(), ...app.floor.occluders]);
+}
+
 // ------------------------------------------------------------------ settings (phone ⚙️, remembered per browser)
 const SETTINGS_KEY = 'worktown3d.settings';
 const DEFAULT_SETTINGS = { sensitivity: 1, fov: 70, nameTags: true, shadows: true, outlines: true, sound: true };
@@ -101,6 +113,10 @@ const app = {
   floorIndex: 0,
   floorData: null,
   isDemo: false,
+  /** Multiplayer connection (organization buildings in hosted mode), or null. */
+  live: null,
+  /** Your saved character: undefined until loaded, null for the look drawn from your login. */
+  myCharacter: undefined,
   floorCache: new Map(),
   liveModals: new Set(),
 
@@ -166,6 +182,29 @@ const app = {
     hud.setPhoneBadge(0);
   },
   goToPerson,
+  goToPlayer,
+  /** Is there an account to save a character to? (Signed in with GitHub, or the GitHub CLI's account locally.) */
+  canCustomize() {
+    const s = this.status;
+    return !!s && !this.isDemo && (s.hosted ? !!s.user : s.mode === 'github');
+  },
+  /** The passport (phone → Me), starting from your saved character. */
+  async openCustomizer() {
+    if (this.myCharacter === undefined) {
+      try {
+        this.myCharacter = (await api.myCharacter()).character;
+      } catch (e) {
+        hud.toast(`⚠️ ${e.message}`, 'error', 7000);
+        return;
+      }
+    }
+    openCustomizer(app, {
+      onSaved: (character) => {
+        app.myCharacter = character;
+        characterChanged(app.viewerLogin(), character);
+      },
+    });
+  },
   takePhoto() {
     renderFrame();
     return canvas.toDataURL('image/jpeg', 0.92);
@@ -208,7 +247,7 @@ function mountFloor(index, data, { arriveInElevator = false, keepPosition = fals
   app.floorIndex = index;
   app.floorData = index ? data : null;
   player.colliders = floor.colliders;
-  interactor.setTargets([...floor.interactables, ...floor.occluders]);
+  remote.setFloor(floor, index ? data.repo.name : null); // also refreshes the interaction targets
   fitShadow(floor.bounds);
   floor.showTags = settings.nameTags;
 
@@ -277,6 +316,7 @@ async function rideTo(index) {
 
 /** Ride to someone's floor (if needed), stand next to them and drop a marker over their head. */
 async function goToPerson(login, repo) {
+  if (app.live && app.live.connected && app.live.playerByLogin(login)) return goToPlayer(login); // they're walking around
   const index = app.world.floors.indexOf(repo) + 1;
   if (!index) return;
   if (app.floorIndex !== index) {
@@ -293,6 +333,37 @@ async function goToPerson(login, repo) {
   camera.rotation.x = -0.12;
   await hud.fade(0, 260);
   app.floor.highlight(login);
+}
+
+/**
+ * Someone's look changed (you saved yours, or a teammate saved theirs): the floors we've loaded get it, and their
+ * desk character on this floor is redrawn. Others see your change through the API (live, or with their next refresh).
+ */
+function characterChanged(login, character) {
+  const key = login.toLowerCase();
+  for (const data of app.floorCache.values()) for (const dev of data.devs) if (dev.login.toLowerCase() === key) dev.character = character;
+  if (app.floor && app.floor.restyle && app.floor.restyle(login, character)) refreshTargets();
+}
+
+/** Ride to where someone who is in the building right now stands, and face them. */
+async function goToPlayer(login) {
+  const at = () => {
+    const p = app.live && app.live.playerByLogin(login);
+    return p && p.at;
+  };
+  if (!at()) return hud.toast(`@${login} isn't around right now`, 'info');
+  const index = at().floor === null ? 0 : app.world.floors.indexOf(at().floor) + 1;
+  if (at().floor !== null && !index) return hud.toast(`@${login} is on ${at().floor}, which has no floor here`, 'info');
+  if (app.floorIndex !== index) {
+    await rideTo(index);
+    if (app.floorIndex !== index) return;
+  }
+  const spot = at();
+  if (!spot) return hud.toast(`@${login} just left`, 'info');
+  await hud.fade(1, 180);
+  // a step in front of them, looking at them
+  player.setPosition(spot.x - Math.sin(spot.yaw) * 1.4, spot.z - Math.cos(spot.yaw) * 1.4, spot.yaw + Math.PI);
+  await hud.fade(0, 260);
 }
 
 // ------------------------------------------------------------------ live updates
@@ -337,7 +408,7 @@ async function refreshFloor(fresh = false, { quiet = false } = {}) {
   if (!app.floor.updateData(data)) {
     hud.toast('👋 The team on this floor changed — rearranging desks', 'info');
     mountFloor(index, data, { keepPosition: true });
-  }
+  } else refreshTargets(); // someone's desk character may have been redrawn with a new look
   app.floorData = data;
   rerenderLiveModals();
 }
@@ -371,7 +442,10 @@ function startPolling() {
   ];
 }
 
-onAvatarsLoaded(() => app.floor && app.floor.refreshAvatars());
+onAvatarsLoaded(() => {
+  if (app.floor) app.floor.refreshAvatars();
+  remote.refreshAvatars();
+});
 
 // ------------------------------------------------------------------ actions (manager powers)
 async function guard(promise) {
@@ -466,6 +540,8 @@ function interact(info) {
       return openManagerConsole(app, 'links');
     case 'robot':
       return openRobot(app);
+    case 'player':
+      return phone.open('person', { login: info.login });
   }
 }
 
@@ -510,6 +586,9 @@ canvas.addEventListener('mousedown', (e) => {
 document.getElementById('phone-chip').addEventListener('click', () => {
   if (entered && !riding && !isModalOpen()) phone.toggle();
 });
+document.getElementById('online-chip').addEventListener('click', () => {
+  if (entered && !riding && !isModalOpen()) phone.open('team');
+});
 
 let everLocked = false;
 player.controls.addEventListener('lock', () => {
@@ -546,12 +625,63 @@ pauseEl.addEventListener('click', (e) => {
 
 // Hosted mode: if the session ends (signed out elsewhere, token revoked, removed from the org) go back to sign-in.
 let leaving = false;
-setSignedOutHandler(() => {
+function sessionEnded() {
   if (leaving || !entered) return;
   leaving = true;
   hud.toast('🔒 Your sign-in ended. Taking you back to the sign-in screen…', 'warn', 4000);
   setTimeout(() => location.reload(), 1800);
-});
+}
+setSignedOutHandler(sessionEnded);
+
+// ------------------------------------------------------------------ multiplayer
+/** In an organization's building (hosted mode), see the other people who are here right now, and be seen. */
+function startLive() {
+  const s = app.status;
+  // Personal buildings and the demo stay single-player.
+  if (!s.hosted || s.mode !== 'github' || app.world.owner.type !== 'Organization') return;
+  app.live = new Live({
+    onEvent(event, someone) {
+      switch (event) {
+        case 'welcome':
+          remote.reset(app.live.online(), app.viewerLogin());
+          break;
+        case 'offline':
+          remote.reset([]);
+          break;
+        case 'join':
+          hud.toast(`👋 @${someone.login} is here`, 'info', 3500);
+          remote.upsert(someone);
+          break;
+        case 'rejoin':
+        case 'move':
+        case 'floor':
+          remote.upsert(someone);
+          break;
+        case 'leave':
+          remote.remove(someone);
+          break;
+        case 'character':
+          remote.restyle(someone);
+          characterChanged(someone.login, someone.character);
+          break;
+      }
+      if (event === 'move') return; // the HUD and the phone don't show exact positions
+      hud.setOnline(app.live.online().length);
+      phone.refresh();
+    },
+    onSignedOut: sessionEnded,
+    onUnavailable(code, reason) {
+      const why = {
+        4001: '👥 This building is open in another tab or window: people see you there, not here.',
+        4403: `🔒 Others can't see you here: ${reason}`,
+        4409: '🏢 You opened another building in another tab. Reload to see who is here.',
+        4429: "🏢 The building is full right now: others will see you when there's room.",
+      }[code];
+      if (why) hud.toast(why, 'warn', 9000);
+    },
+  });
+  app.live.start();
+}
 
 // ------------------------------------------------------------------ boot
 async function boot() {
@@ -623,6 +753,7 @@ async function boot() {
       hud.loading(null);
       hud.showHud(true);
       startPolling();
+      startLive();
       if (app.isDemo) hud.toast(status.hosted ? '🎭 Demo company with fictional data. Sign in with GitHub to see your real org.' : '🎭 Demo company with fictional data. Connect the GitHub CLI to see your real org.', 'info', 7000);
       hud.toast('👋 Take the elevator (behind you) to visit a repo — or walk east to the Manager\'s Office.', 'info', 8000);
       announceEmptyBuilding();
@@ -672,6 +803,8 @@ function frame() {
       player.update(dt);
     }
     app.floor.update(dt, t, camera);
+    remote.update(dt, t, camera, settings.nameTags);
+    if (entered && !riding && app.live) app.live.sendPosition(app.currentRepo(), camera.position.x, camera.position.z, camera.rotation.y);
     if (entered && player.active && !uiBlocked() && !riding) {
       currentHint = interactor.update();
       hud.setHint(currentHint ? currentHint.label : null);
